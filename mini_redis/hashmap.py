@@ -75,6 +75,16 @@ class HashMap:
 
     def contains(self, key: str) -> bool:
         return self.get(key) != None
+
+    def keys(self) -> list:
+        # 저장된 모든 키를 리스트로 반환
+        result = []
+        for bucket in self.buckets:
+            curr = bucket
+            while curr:
+                result.append(curr.key)
+                curr = curr.next
+        return result
                 
     def size(self) -> int:
         return self.size_

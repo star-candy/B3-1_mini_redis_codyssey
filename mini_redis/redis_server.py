@@ -101,76 +101,76 @@ class MiniRedis:
         self._enforce_enviction() # put후 메모리 초과시 lru 제거
         return "OK"
 
-        def get(self, key: str):
-            self._cleanup_expired()
-            # 해당 데이터 만료, 혹은 미존재 경우
-            if self._check_and_remove_if_expired(key) or self.store.contains(key):
-                return "(nil)"
+    def get(self, key: str):
+        self._cleanup_expired()
+        # 해당 데이터 만료, 혹은 미존재 경우
+        if self._check_and_remove_if_expired(key) or not self.store.contains(key):
+            return "(nil)"
 
-            node = self.store.get(key)
-            self.lru.move_to_front(node) # 해당 노드를 맨앞으로
-            return f'"{node.value}"'
+        node = self.store.get(key)
+        self.lru.move_to_front(node) # 해당 노드를 맨앞으로
+        return f'"{node.value}"'
         
-        def delete(self, key: str):
-            self._cleanup_expired()
-            # 해당 키 존재하지 않는 경우
-            if self._check_and_remove_if_expired(key) or not self.store.contains(key):
-                return "(integer) 0" 
+    def delete(self, key: str):
+        self._cleanup_expired()
+        # 해당 키 존재하지 않는 경우
+        if self._check_and_remove_if_expired(key) or not self.store.contains(key):
+            return "(integer) 0" 
+        self._delete_entry(key)
+        return "(integer) 1"
+            
+    def exist(self, key: str):
+        self._cleanup_expired()
+        if self._check_and_remove_if_expired(key) or not self.store.contains(key):
+            return "(integer) 0"
+        return "(integer) 1"
+
+    def dbsize(self):
+        self._cleanup_expired()
+        return f"(integer) {self.store.size()}"
+
+    def keys(self):
+        self._cleanup_expired()
+        all_keys = self.store.keys()
+        # 모든 키 중 만료된 것 제외
+        valid_keys = [k for k in all_keys if not self._check_and_remove_if_expired(k)]
+
+        if not valid_keys:
+            return "(empty array)"
+            
+        return '\n'.join(f'{i+1}"{k}"' for i, k in enumerate(valid_keys))
+            
+    def expire(self, key:str, seconds: str):
+        # ttl 업데이트
+        self._cleanup_expired()
+        try:
+            sec = int(seconds)
+        except ValueError:
+            return "(error) 입력값이 정수가 아닙니다."
+            
+        if self._check_and_remove_if_expired(key) or not self.store.contains(key):
+            return "(integer) 0" # 동작 미수행 종료
+            
+        if sec <= 0: # 0초이하이면 즉시 제거
             self._delete_entry(key)
-            return "(integer) 1"
-            
-        def exist(self, key: str):
-            self._cleanup_expired()
-            if self._check_and_remove_if_expired(key) or not self.store.contains(key):
-                return "(integer) 0"
-            return "(integer) 1"
+            return "(integer) 1" # 정상적으로 제거
 
-        def dbsize(self):
-            self._cleanup_expired()
-            return f"(integer) {self.store.size()}"
+        expire_at = time.time() + sec
+        self.ttl_map.put(key, expire_at) # ttl_map에 expire_at 수정 (기존 키값 존재시 덮어쓰기)
+        self.ttl_heap.push((expire_at, key)) # ttl_heap에 expire_at 수정 (기존 키값 존재시 덮어쓰기)
+        return "(integer) 1" # 정상적으로 저장
 
-        def keys(self):
-            self._cleanup_expired()
-            all_keys = self.store.keys()
-            # 모든 키 중 만료된 것 제외
-            valid_keys = [k for k in all_keys if self._check_and_remove_if_expired(k)]
-
-            if not valid_keys:
-                return "(empty array)"
+    def ttl(self, key: str):
+        # ttl 확인
+        self._cleanup_expired()
+        if self._check_and_remove_if_expired(key) or not self.store.contains(key):
+            return "(integer) -2" # 동작 미수행 종료
             
-            return '\n'.join(f'{i+1}"{k}"' for i, k in enumerate(valid_keys))
+        expire_at = self.ttl_map.get(key)
+        if expire_at is None:
+            return "(integer) -1" # ttl 미설정
             
-        def expire(self, key:str, seconds: str):
-            # ttl 업데이트
-            self._cleanup_expired()
-            try:
-                sec = int(seconds)
-            except ValueError:
-                return "(error) 입력값이 정수가 아닙니다."
-            
-            if self._check_and_remove_if_expired(key) or not self.store.contains(key):
-                return "(integer) 0" # 동작 미수행 종료
-            
-            if sec <= 0: # 0초이하이면 즉시 제거
-                self._delete_entry(key)
-                return "(integer) 1" # 정상적으로 제거
-
-            expire_at = time.time() + sec
-            self.ttl_map.put(key, expire_at) # ttl_map에 expire_at 수정 (기존 키값 존재시 덮어쓰기)
-            self.ttl_heap.push((expire_at, key)) # ttl_heap에 expire_at 수정 (기존 키값 존재시 덮어쓰기)
-            return "(integer) 1" # 정상적으로 저장
-
-        def ttl(self, key: str):
-            # ttl 확인
-            self._cleanup_expired()
-            if self._check_and_remove_if_expired(key) or not self.store.contains(key):
-                return "(integer) -2" # 동작 미수행 종료
-            
-            expire_at = self.ttl_map.get(key)
-            if expire_at is None:
-                return "(integer) -1" # ttl 미설정
-            
-            remain = int(expire_at - time.time())
-            return f"(integer) {remain if remain > 0 else 0}" # 음수일 경우 0반환
+        remain = int(expire_at - time.time())
+        return f"(integer) {remain if remain > 0 else 0}" # 음수일 경우 0반환
         
         
